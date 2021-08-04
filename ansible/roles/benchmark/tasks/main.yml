@@ -1,0 +1,90 @@
+- name: create isucon directory
+  file: path="{{ item }}" state=directory mode=0755 owner=admin group=admin
+  tags: benchmark
+  with_items:
+    - /home/admin/isucon
+    - /home/admin/isucon/bin
+    - /home/admin/isucon/assets
+
+- name: copy payment
+  copy: src="payment" dest="/home/admin/isucon/bin/payment" owner=admin group=admin mode=0755
+  tags:
+    - benchmark
+    - payment
+  notify: restart payment
+
+- name: copy bench
+  copy: src="bench" dest="/home/admin/isucon/bin/bench" owner=admin group=admin mode=0755
+  tags:
+    - benchmark-bin
+    - benchmark
+
+- name: copy benchworker
+  copy: src="benchworker" dest="/home/admin/isucon/bin/benchworker" owner=admin group=admin mode=0755
+  tags: benchmark
+  notify: restart benchworker
+
+- name: copy frontend
+  copy: src=frontend.tar.gz dest=/home/admin/isucon/ owner=www-data group=www-data
+  tags:
+    - benchmark
+    - frontend
+  register: frontend
+
+- name: unarchive frontned
+  shell: rm -rf /home/admin/isucon/assets && mkdir /home/admin/isucon/assets && cd /home/admin/isucon/assets && tar zxvf ../frontend.tar.gz
+  tags:
+    - benchmark
+    - frontend
+  when: frontend.changed
+
+- name: create systemd services
+  template: src="{{ item }}.service" dest="/etc/systemd/system/{{ item }}.service" owner=root group=root mode=0644
+  tags: benchmark
+  notify: systemctl daemon-reload
+  with_items:
+    - benchworker
+    - payment
+
+- name: create .env
+  template: src=env dest="/home/admin/isucon/.env" owner=admin group=admin mode=0644
+  tags: benchmark
+
+- name: enabled service
+  service: name="{{ item }}" enabled=yes state=started
+  tags: benchmark
+  with_items:
+    - benchworker
+    - payment
+
+- name: install nginx
+  apt: name=nginx state=latest update_cache=yes
+  tags: benchmark
+
+- name: modify nginx.service
+  template: src=nginx.service dest=/lib/systemd/system/nginx.service owner=root group=root mode=0644
+  tags: benchmark
+  notify:
+    - systemctl daemon-reload
+    - restart nginx
+
+- name: nginx config
+  template: src=nginx/default dest=/etc/nginx/sites-available/default owner=root group=root mode=0644
+  tags: benchmark
+  notify: reload nginx
+
+- name: create ssl directory
+  file: path=/etc/nginx/keys state=directory owner=root group=root mode=0700
+  tags: benchmark
+
+- name: copy ssl keys
+  copy: src="certs/isucon9.hinatan.net/{{ item }}" dest="/etc/nginx/keys/{{ item }}" owner=root group=root mode=0600
+  tags: benchmark
+  with_items:
+    - fullchain.pem
+    - privkey.pem
+  notify: reload nginx
+
+- name: robots.txt
+  template: src=nginx/robots.txt dest=/var/www/html/robots.txt owner=root group=root mode=0644
+  tags: benchmark
